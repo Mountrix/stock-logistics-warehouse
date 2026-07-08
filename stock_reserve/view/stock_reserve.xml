@@ -144,7 +144,7 @@
                 <field name="product_id" />
                 <field name="move_id" />
                 <field name="restrict_partner_id" groups="stock.group_tracking_owner" />
-                <group expand="0" string="Group By...">
+                <group>
                     <filter
                         string="Status"
                         name="groupby_state"
