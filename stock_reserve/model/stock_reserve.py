@@ -32,7 +32,9 @@ class StockReservation(models.Model):
     _name = "stock.reservation"
     _description = "Stock Reservation"
     _inherits = {"stock.move": "move_id"}
+    _rec_name = "name"
 
+    name = fields.Char(required=True)
     note = fields.Text(string="Notes")
     move_id = fields.Many2one(
         "stock.move",
@@ -165,9 +167,9 @@ class StockReservation(models.Model):
         # save value before reading of self.move_id as this last one erase
         # product_id value
         self.move_id.product_id = self.product_id
-        self.move_id._onchange_product_id()
-        self.name = self.move_id.name
-        self.product_uom = self.move_id.product_uom
+        if self.product_id:
+            self.name = self.product_id.display_name
+            self.product_uom = self.product_id.uom_id
 
     @api.onchange("product_uom_qty")
     def _onchange_quantity(self):
