@@ -173,13 +173,22 @@ class SaleStockReserve(models.TransientModel):
             )
         reservations = self.stock_reserve(lines)
         if not reservations:
-            raise UserError(
-                _(
-                    "No reservation could be created. The selected lines are "
-                    "not reservable (e.g. services, make to order products, "
-                    "or lines that are already reserved)."
-                )
-            )
+            details = []
+            for line in lines:
+                reason = line._stock_reserve_blocking_reason()
+                if reason:
+                    details.append(
+                        _("- %(product)s: %(reason)s")
+                        % {
+                            "product": line.product_id.display_name
+                            or line.name,
+                            "reason": reason,
+                        }
+                    )
+            message = _("No reservation could be created.")
+            if details:
+                message += "\n\n" + "\n".join(details)
+            raise UserError(message)
         action = self.env["ir.actions.act_window"]._for_xml_id(
             "stock_reserve.action_stock_reservation_tree"
         )

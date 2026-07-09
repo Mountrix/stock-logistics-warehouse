@@ -49,21 +49,34 @@ class SaleOrderLine(models.Model):
             return rule.procure_method
         return False
 
-    @api.depends("state", "product_id.route_ids", "product_id.type")
+    def _stock_reserve_blocking_reason(self):
+        """Return a human-readable reason if the line cannot be reserved.
+
+        Returns ``False`` when the line is reservable.
+        """
+        self.ensure_one()
+        if not self.product_id:
+            return _("no product is set")
+        if self.product_id.type == "service":
+            return _("the product is a service")
+        if self.state not in ("draft", "sent"):
+            return _("the order is no longer a quotation")
+        if self.is_mto:
+            return _("the product is Make To Order")
+        if self.reservation_ids:
+            return _("the line is already reserved")
+        return False
+
+    @api.depends(
+        "state",
+        "product_id",
+        "product_id.type",
+        "is_mto",
+        "reservation_ids",
+    )
     def _compute_is_stock_reservable(self):
         for line in self:
-            reservable = False
-            if (
-                not (
-                    line.state not in ("draft", "sent")
-                    or line._get_procure_method() == "make_to_order"
-                    or not line.product_id
-                    or line.product_id.type == "service"
-                )
-                and not line.reservation_ids
-            ):
-                reservable = True
-            line.is_stock_reservable = reservable
+            line.is_stock_reservable = not line._stock_reserve_blocking_reason()
 
     @api.depends("order_id.state", "reservation_ids")
     def _compute_is_readonly(self):
