@@ -1,6 +1,10 @@
 # Copyright 2013 Camptocamp SA - Guewen Baconnier
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+from datetime import timedelta
+
 from odoo import api, fields, models
+from odoo.exceptions import UserError
+from odoo.tools.translate import _
 
 
 class SaleStockReserve(models.TransientModel):
@@ -20,6 +24,21 @@ class SaleStockReserve(models.TransientModel):
     def _default_location_dest_id(self):
         return self.env["stock.reservation"]._default_location_dest_id()
 
+    @api.model
+    def _default_date_validity(self):
+        days = int(
+            self.env["ir.config_parameter"]
+            .sudo()
+            .get_param("stock_reserve_sale.reservation_validity_days", 2)
+        )
+        if days <= 0:
+            return False
+        return fields.Date.context_today(self) + timedelta(days=days)
+
+    sale_order_id = fields.Many2one("sale.order", string="Sale Order")
+    sale_line_ids = fields.Many2many(
+        "sale.order.line", string="Sale Order Lines"
+    )
     location_id = fields.Many2one(
         "stock.location", "Source Location", required=True, default=_default_location_id
     )
@@ -32,11 +51,27 @@ class SaleStockReserve(models.TransientModel):
     )
     date_validity = fields.Date(
         "Validity Date",
+        default=_default_date_validity,
         help="If a date is given, the reservations will be released "
         "at the end of the validity.",
     )
     note = fields.Text("Notes")
     owner_id = fields.Many2one("res.partner", "Stock Owner")
+
+    @api.model
+    def default_get(self, fields_list):
+        res = super().default_get(fields_list)
+        active_model = self.env.context.get("active_model")
+        active_ids = self.env.context.get("active_ids") or (
+            [self.env.context["active_id"]]
+            if self.env.context.get("active_id")
+            else []
+        )
+        if active_model == "sale.order" and active_ids:
+            res["sale_order_id"] = active_ids[0]
+        elif active_model == "sale.order.line" and active_ids:
+            res["sale_line_ids"] = [(6, 0, active_ids)]
+        return res
 
     def _prepare_stock_reservation(self, line):
         self.ensure_one()
@@ -92,29 +127,62 @@ class SaleStockReserve(models.TransientModel):
             "picking_id": picking_id.id,
         }
 
-    def stock_reserve(self, line_ids):
+    def stock_reserve(self, lines):
         self.ensure_one()
 
-        lines = self.env["sale.order.line"].browse(line_ids)
+        if not isinstance(lines, models.BaseModel):
+            lines = self.env["sale.order.line"].browse(lines)
+        reservations = self.env["stock.reservation"]
         for line in lines:
             if not line.is_stock_reservable:
                 continue
             vals = self._prepare_stock_reservation(line)
             reserv = self.env["stock.reservation"].create(vals)
             reserv.reserve()
+            reservations |= reserv
+        return reservations
+
+    def _get_target_lines(self):
+        """Determine which sale order lines to reserve.
+
+        Rely on the values captured at wizard opening (``default_get``),
+        falling back to the context for backward compatibility.
+        """
+        self.ensure_one()
+        if self.sale_line_ids:
+            return self.sale_line_ids
+        if self.sale_order_id:
+            return self.sale_order_id.order_line
+        active_model = self.env.context.get("active_model")
+        active_ids = self.env.context.get("active_ids")
+        if active_model == "sale.order" and active_ids:
+            return self.env["sale.order"].browse(active_ids).order_line
+        if active_model == "sale.order.line" and active_ids:
+            return self.env["sale.order.line"].browse(active_ids)
+        return self.env["sale.order.line"]
 
     def button_reserve(self):
         self.ensure_one()
-        active_model = self.env.context.get("active_model")
-        active_ids = self.env.context.get("active_ids")
-        if not (active_model and active_ids):
-            return
-
-        if active_model == "sale.order":
-            sales = self.env["sale.order"].browse(active_ids)
-            line_ids = sales.order_line.ids
-
-        if active_model == "sale.order.line":
-            line_ids = active_ids
-
-        self.stock_reserve(line_ids)
+        lines = self._get_target_lines()
+        if not lines:
+            raise UserError(
+                _(
+                    "No sale order or lines were found to reserve. "
+                    "Please open the wizard from a quotation."
+                )
+            )
+        reservations = self.stock_reserve(lines)
+        if not reservations:
+            raise UserError(
+                _(
+                    "No reservation could be created. The selected lines are "
+                    "not reservable (e.g. services, make to order products, "
+                    "or lines that are already reserved)."
+                )
+            )
+        action = self.env["ir.actions.act_window"]._for_xml_id(
+            "stock_reserve.action_stock_reservation_tree"
+        )
+        action["domain"] = [("id", "in", reservations.ids)]
+        action["context"] = {}
+        return action

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<odoo>
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.stock.reserve.sale</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="stock.res_config_settings_view_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//app[@name='stock']" position="inside">
+                <block title="Stock Reservations" id="stock_reservation_setting_block">
+                    <setting
+                        id="stock_reservation_validity_setting"
+                        string="Reservation Validity"
+                        help="Default number of days added to today, used as the validity date when reserving stock from a quotation."
+                    >
+                        <div class="content-group">
+                            <div class="mt16">
+                                <label
+                                    for="stock_reservation_validity_days"
+                                    class="o_light_label"
+                                />
+                                <field name="stock_reservation_validity_days" />
+                                <span>days</span>
+                            </div>
+                        </div>
+                    </setting>
+                </block>
+            </xpath>
+        </field>
+    </record>
+</odoo>
